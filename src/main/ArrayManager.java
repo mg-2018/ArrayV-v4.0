@@ -1,7 +1,10 @@
 package main;
 
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Hashtable;
 import java.util.Random;
+import java.util.function.IntConsumer;
 
 import panes.JErrorPane;
 import utils.Delays;
@@ -39,11 +42,12 @@ SOFTWARE.
  */
 
 final public class ArrayManager {
-    private int[] presortedArray;
     private utils.Shuffles[] shuffleTypes;
     private utils.Distributions[] distributionTypes;
     private String[] shuffleIDs;
     private String[] distributionIDs;
+
+    private boolean hadDistributionAllocationError;
 
     private volatile boolean MUTABLE;
 
@@ -56,12 +60,13 @@ final public class ArrayManager {
 
     public ArrayManager(ArrayVisualizer arrayVisualizer) {
         this.ArrayVisualizer = arrayVisualizer;
-        this.presortedArray = new int[ArrayVisualizer.getMaximumLength()];
 
         this.Shuffles = utils.Shuffles.RANDOM;
         this.Distributions = utils.Distributions.LINEAR;
         this.shuffleTypes = utils.Shuffles.values();
         this.distributionTypes = utils.Distributions.values();
+
+        hadDistributionAllocationError = false;
 
         this.Delays = ArrayVisualizer.getDelays();
         this.Highlights = ArrayVisualizer.getHighlights();
@@ -94,7 +99,15 @@ final public class ArrayManager {
 
         int currentLen = ArrayVisualizer.getCurrentLength();
 
-        int[] temp = new int[currentLen];
+        int[] temp;
+        try {
+            temp = new int[currentLen];
+        } catch (OutOfMemoryError e) {
+            if (!hadDistributionAllocationError)
+                JErrorPane.invokeCustomErrorMessage("Failed to allocate temporary array for distribution. (will use main array, which may have side-effects.)");
+            hadDistributionAllocationError = true;
+            temp = array;
+        }
         Distributions.initializeArray(temp, this.ArrayVisualizer);
 
         double uniqueFactor = (double)currentLen/ArrayVisualizer.getUniqueItems();
@@ -103,16 +116,6 @@ final public class ArrayManager {
 
         System.arraycopy(temp, 0, array, 0, currentLen);
         ArrayVisualizer.updateNow();
-    }
-
-    public void initializePresortedArray() {
-        for (int i = 0; i < this.presortedArray.length; i++) {
-            this.presortedArray[i] = i;
-        }
-
-        for(int i = 0; i < Math.max((this.presortedArray.length / 10), 1); i++){
-            Writes.swap(this.presortedArray, (int) (Math.random() * this.presortedArray.length), (int) (Math.random() * this.presortedArray.length), 0, true, false);
-        }
     }
 
     public String[] getShuffleIDs() {
@@ -222,6 +225,19 @@ final public class ArrayManager {
 
             if(ArrayVisualizer.doingStabilityCheck())
                 this.stableShuffle(array, currentLen);
+
+            int[] validateArray = ArrayVisualizer.getValidationArray();
+            if (validateArray != null) {
+                System.arraycopy(array, 0, validateArray, 0, currentLen);
+                Arrays.sort(validateArray, 0, currentLen);
+                if (ArrayVisualizer.reversedComparator()) {
+                    for (int i = 0, j = currentLen - 1; i < j; i++, j--) {
+                        int temp = validateArray[i];
+                        validateArray[i] = validateArray[j];
+                        validateArray[j] = temp;
+                    }
+                }
+            }
         }
 
         Highlights.clearAllMarks();
